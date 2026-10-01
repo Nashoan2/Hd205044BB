@@ -242,11 +242,36 @@ class RoomBackupManager(private val context: Context) {
   }
 
   /**
+   * Creates a backup snapshot using current data parameters.
+   */
+  suspend fun createBackupSnapshot(
+    invoices: List<InvoiceData>,
+    customers: List<Customer>,
+    storeConfig: StoreConfig,
+    exchangeRates: ExchangeRates,
+    nextReceiptVoucherNum: Int = 1,
+    nextPaymentVoucherNum: Int = 1,
+    note: String = "",
+    title: String = ""
+  ): RoomBackupSnapshotEntity = createLocalRoomBackup(
+    title = title,
+    invoices = invoices,
+    customers = customers,
+    storeConfig = storeConfig,
+    exchangeRates = exchangeRates,
+    nextReceiptVoucherNum = nextReceiptVoucherNum,
+    nextPaymentVoucherNum = nextPaymentVoucherNum,
+    note = note
+  )
+
+  /**
    * Gets all backup snapshots stored in Room.
    */
   suspend fun getAllRoomSnapshots(): List<RoomBackupSnapshotEntity> = withContext(Dispatchers.IO) {
     backupDao.getAllSnapshots()
   }
+
+  suspend fun getAllSnapshots(): List<RoomBackupSnapshotEntity> = getAllRoomSnapshots()
 
   /**
    * Deletes a backup snapshot by ID.

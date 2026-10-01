@@ -2226,7 +2226,7 @@ class InvoiceViewModel(application: Application) : AndroidViewModel(application)
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(Date())
         _uiState.value = _uiState.value.copy(
           lastAutoBackupDate = todayStr,
-          roomSnapshots = repository.roomBackupManager.getAllSnapshots()
+          roomSnapshots = repository.roomBackupManager.getAllRoomSnapshots()
         )
         showToast("✅ تم تصدير النسخة الاحتياطية بنجاح إلى وحدة التخزين:\n${file.name}")
       } else {
@@ -2243,7 +2243,7 @@ class InvoiceViewModel(application: Application) : AndroidViewModel(application)
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(Date())
         _uiState.value = _uiState.value.copy(
           lastAutoBackupDate = todayStr,
-          roomSnapshots = repository.roomBackupManager.getAllSnapshots()
+          roomSnapshots = repository.roomBackupManager.getAllRoomSnapshots()
         )
         showToast("🔄 تم تصدير نسخة احتياطية تلقائية لليوم إلى وحدة التخزين بنجاح.")
       }

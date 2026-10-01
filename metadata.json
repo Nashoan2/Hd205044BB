@@ -1,6 +1,6 @@
 {
-  "name": "WAIVE",
-  "description": "Imported from GitHub: Nashoan2أأ",
+  "name": "المملكة للإلكترونيات",
+  "description": "نظام إدارة الفواتير والعملاء - المملكة للإلكترونيات",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
