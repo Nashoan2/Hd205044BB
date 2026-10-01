@@ -1,0 +1,8 @@
+{
+  "name": "WAIVE",
+  "description": "Imported from GitHub: Nashoan2أأ",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
