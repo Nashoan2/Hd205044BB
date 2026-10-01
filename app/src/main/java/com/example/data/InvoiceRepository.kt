@@ -31,10 +31,10 @@ class InvoiceRepository(context: Context) {
   var storeConfig: StoreConfig = loadStoreConfig()
     private set
 
-  var customers: MutableList<Customer> = loadCustomers()
+  var exchangeRates: ExchangeRates = loadExchangeRates()
     private set
 
-  var exchangeRates: ExchangeRates = loadExchangeRates()
+  var customers: MutableList<Customer> = loadCustomers()
     private set
 
   var savedInvoices: MutableList<InvoiceData> = loadSavedInvoices()
@@ -189,16 +189,22 @@ class InvoiceRepository(context: Context) {
           savedInvoices = roomInvoices.toMutableList()
           needUpdate = true
         }
-        if (customers.isEmpty() && roomCustomers.isNotEmpty()) {
+        val memoryHasData = customers.any { it.transactions.isNotEmpty() || it.balance != 0.0 }
+        val roomHasData = roomCustomers.any { it.transactions.isNotEmpty() || it.balance != 0.0 }
+        if (!memoryHasData && roomHasData) {
+          customers = roomCustomers.toMutableList()
+          needUpdate = true
+        } else if (customers.isEmpty() && roomCustomers.isNotEmpty()) {
           customers = roomCustomers.toMutableList()
           needUpdate = true
         }
         if (needUpdate) {
           saveInvoices(savedInvoices)
           saveCustomers(customers)
+        } else {
+          // Always guarantee latest state is saved in Room database
+          roomBackupManager.syncAllToRoom(savedInvoices, customers)
         }
-        // Always guarantee latest state is saved in Room database
-        roomBackupManager.syncAllToRoom(savedInvoices, customers)
       } catch (e: Exception) {
         e.printStackTrace()
       }
@@ -576,6 +582,13 @@ class InvoiceRepository(context: Context) {
             )
           }
         }
+        val storedBalance = obj.optDouble("balance", 0.0)
+        // If stored balance is 0.0 but customer has transactions whose last balanceAfter is non-zero, restore it
+        val effectiveBalance = if (storedBalance == 0.0 && txList.isNotEmpty() && txList.last().balanceAfter != 0.0) {
+          txList.last().balanceAfter
+        } else {
+          storedBalance
+        }
         list.add(
           Customer(
             id = obj.optLong("id", System.currentTimeMillis()),
@@ -583,7 +596,7 @@ class InvoiceRepository(context: Context) {
             name = obj.optString("name"),
             phone = obj.optString("phone"),
             address = obj.optString("address"),
-            balance = obj.optDouble("balance", 0.0),
+            balance = effectiveBalance,
             transactions = txList
           )
         )
@@ -594,9 +607,9 @@ class InvoiceRepository(context: Context) {
         saveCustomers(migrated)
         return migrated
       }
-      val recalculatedList = list.map { recalculateCustomerBalance(it) }.toMutableList()
-      recalculatedList
-    } catch (_: Exception) {
+      list
+    } catch (e: Exception) {
+      e.printStackTrace()
       mutableListOf()
     }
   }
