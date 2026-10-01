@@ -384,9 +384,6 @@ class RoomBackupManager(private val context: Context) {
       put("wmAr", storeConfig.wmAr)
       put("terms", storeConfig.terms)
       put("logoBase64", storeConfig.logoBase64)
-      put("primaryCurrency", storeConfig.primaryCurrency)
-      put("primaryCurrencySymbol", storeConfig.primaryCurrencySymbol)
-      put("primaryCurrencyNameAr", storeConfig.primaryCurrencyNameAr)
     }
     root.put("storeConfig", scObj)
 

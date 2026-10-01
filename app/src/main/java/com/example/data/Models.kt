@@ -9,10 +9,7 @@ data class StoreConfig(
   val addressEn: String = "YEMEN Ibb",
   val wmAr: String = "المملكة للإلكترونيات",
   val terms: String = "• البضاعة المباعة لا ترد ولا تستبدل بعد خروجها من المحل.\n• استلمت البضاعة الموضحة أعلاه كاملة ، سليمة ، ولعدد ذلك.",
-  val logoBase64: String = "",
-  val primaryCurrency: String = "YER",
-  val primaryCurrencySymbol: String = "ر.ي",
-  val primaryCurrencyNameAr: String = "ريال يمني"
+  val logoBase64: String = ""
 )
 
 data class TransactionRecord(

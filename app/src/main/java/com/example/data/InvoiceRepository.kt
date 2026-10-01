@@ -31,10 +31,10 @@ class InvoiceRepository(context: Context) {
   var storeConfig: StoreConfig = loadStoreConfig()
     private set
 
-  var exchangeRates: ExchangeRates = loadExchangeRates()
+  var customers: MutableList<Customer> = loadCustomers()
     private set
 
-  var customers: MutableList<Customer> = loadCustomers()
+  var exchangeRates: ExchangeRates = loadExchangeRates()
     private set
 
   var savedInvoices: MutableList<InvoiceData> = loadSavedInvoices()
@@ -137,15 +137,14 @@ class InvoiceRepository(context: Context) {
 
     try {
       // 1. Create Room database backup snapshot
-      roomBackupManager.createLocalRoomBackup(
-        title = "نسخة احتياطية تلقائية يومية ($todayStr)",
+      roomBackupManager.createBackupSnapshot(
         invoices = savedInvoices,
         customers = customers,
         storeConfig = storeConfig,
         exchangeRates = exchangeRates,
         nextReceiptVoucherNum = nextReceiptVoucherNum,
         nextPaymentVoucherNum = nextPaymentVoucherNum,
-        note = "تم الإنشاء تلقائياً عند دخول التطبيق ($todayStr)"
+        note = "نسخة احتياطية تلقائية يومية ($todayStr)"
       )
 
       // 2. Export physical file to app backup directory
@@ -189,22 +188,16 @@ class InvoiceRepository(context: Context) {
           savedInvoices = roomInvoices.toMutableList()
           needUpdate = true
         }
-        val memoryHasData = customers.any { it.transactions.isNotEmpty() || it.balance != 0.0 }
-        val roomHasData = roomCustomers.any { it.transactions.isNotEmpty() || it.balance != 0.0 }
-        if (!memoryHasData && roomHasData) {
-          customers = roomCustomers.toMutableList()
-          needUpdate = true
-        } else if (customers.isEmpty() && roomCustomers.isNotEmpty()) {
+        if (customers.isEmpty() && roomCustomers.isNotEmpty()) {
           customers = roomCustomers.toMutableList()
           needUpdate = true
         }
         if (needUpdate) {
           saveInvoices(savedInvoices)
           saveCustomers(customers)
-        } else {
-          // Always guarantee latest state is saved in Room database
-          roomBackupManager.syncAllToRoom(savedInvoices, customers)
         }
+        // Always guarantee latest state is saved in Room database
+        roomBackupManager.syncAllToRoom(savedInvoices, customers)
       } catch (e: Exception) {
         e.printStackTrace()
       }
@@ -224,10 +217,7 @@ class InvoiceRepository(context: Context) {
         addressEn = obj.optString("addressEn", "YEMEN Ibb"),
         wmAr = obj.optString("wmAr", "المملكة للإلكترونيات"),
         terms = obj.optString("terms", "• البضاعة المباعة لا ترد ولا تستبدل بعد خروجها من المحل.\n• استلمت البضاعة الموضحة أعلاه كاملة ، سليمة ، ولعدد ذلك."),
-        logoBase64 = obj.optString("logoBase64", ""),
-        primaryCurrency = obj.optString("primaryCurrency", "YER"),
-        primaryCurrencySymbol = obj.optString("primaryCurrencySymbol", "ر.ي"),
-        primaryCurrencyNameAr = obj.optString("primaryCurrencyNameAr", "ريال يمني")
+        logoBase64 = obj.optString("logoBase64", "")
       )
     } catch (_: Exception) {
       StoreConfig()
@@ -235,7 +225,6 @@ class InvoiceRepository(context: Context) {
   }
 
   fun saveStoreConfig(config: StoreConfig) {
-    val currencyChanged = storeConfig.primaryCurrency != config.primaryCurrency
     storeConfig = config
     val obj = JSONObject().apply {
       put("storeNameAr", config.storeNameAr)
@@ -247,14 +236,8 @@ class InvoiceRepository(context: Context) {
       put("wmAr", config.wmAr)
       put("terms", config.terms)
       put("logoBase64", config.logoBase64)
-      put("primaryCurrency", config.primaryCurrency)
-      put("primaryCurrencySymbol", config.primaryCurrencySymbol)
-      put("primaryCurrencyNameAr", config.primaryCurrencyNameAr)
     }
     prefs.edit().putString("storeConfigData", obj.toString()).apply()
-    if (currencyChanged) {
-      recalculateAllCustomerBalances()
-    }
   }
 
   private fun loadUiCustomizationConfig(): UiCustomizationConfig {
@@ -582,13 +565,6 @@ class InvoiceRepository(context: Context) {
             )
           }
         }
-        val storedBalance = obj.optDouble("balance", 0.0)
-        // If stored balance is 0.0 but customer has transactions whose last balanceAfter is non-zero, restore it
-        val effectiveBalance = if (storedBalance == 0.0 && txList.isNotEmpty() && txList.last().balanceAfter != 0.0) {
-          txList.last().balanceAfter
-        } else {
-          storedBalance
-        }
         list.add(
           Customer(
             id = obj.optLong("id", System.currentTimeMillis()),
@@ -596,7 +572,7 @@ class InvoiceRepository(context: Context) {
             name = obj.optString("name"),
             phone = obj.optString("phone"),
             address = obj.optString("address"),
-            balance = effectiveBalance,
+            balance = obj.optDouble("balance", 0.0),
             transactions = txList
           )
         )
@@ -608,8 +584,7 @@ class InvoiceRepository(context: Context) {
         return migrated
       }
       list
-    } catch (e: Exception) {
-      e.printStackTrace()
+    } catch (_: Exception) {
       mutableListOf()
     }
   }
@@ -668,69 +643,23 @@ class InvoiceRepository(context: Context) {
     return customers.find { ArabicNumberHelper.toEngDigits(it.accountNumber).trim() == clean }
   }
 
-  fun recalculateCustomerBalance(customer: Customer, targetBaseCurrency: String? = null): Customer {
-    if (customer.transactions.isEmpty()) {
-      return customer.copy(balance = 0.0)
-    }
-
-    val usedCurrencies = customer.transactions.map { it.currency.ifBlank { "YER" } }.distinct()
-    val baseCurrency = when {
-      targetBaseCurrency != null -> targetBaseCurrency
-      usedCurrencies.size == 1 -> usedCurrencies.first()
-      else -> storeConfig.primaryCurrency.ifBlank { "YER" }
-    }
-
-    // Check if the customer's balance is currently settled at 0.0
-    val isAlreadySettledAtZero = Math.abs(customer.balance) < 0.01 &&
-      customer.transactions.isNotEmpty() &&
-      Math.abs(customer.transactions.last().balanceAfter) < 0.01
-
-    if (isAlreadySettledAtZero) {
-      // The account is balanced at 0 - modifying exchange rates does not alter their 0 balance
-      return customer.copy(balance = 0.0)
-    }
-
-    // Find the last settlement checkpoint where balance reached 0 before any new transactions
-    var lastSettledIndex = -1
-    for (i in 0 until customer.transactions.size - 1) {
-      if (Math.abs(customer.transactions[i].balanceAfter) < 0.01) {
-        lastSettledIndex = i
-      }
-    }
-
-    val updatedTransactions = customer.transactions.toMutableList()
-
-    // Calculate running balance: if a prior settlement exists, start from 0.0 after that settlement;
-    // otherwise calculate from the beginning.
+  fun recalculateCustomerBalance(customer: Customer): Customer {
     var currentBalance = 0.0
-    val startIndex = if (lastSettledIndex >= 0) lastSettledIndex + 1 else 0
-    for (i in startIndex until updatedTransactions.size) {
-      val t = updatedTransactions[i]
-      val txCurr = t.currency.ifBlank { baseCurrency }
-      val amountInBase = convertCurrency(t.amount, txCurr, baseCurrency)
-
+    val updatedTransactions = customer.transactions.map { t ->
       when (t.type) {
-        "قبض" -> currentBalance -= amountInBase
-        "صرف", "فاتورة", "افتتاح" -> currentBalance += amountInBase
-        else -> currentBalance += amountInBase
+        "قبض" -> currentBalance -= t.amount
+        "صرف", "فاتورة", "افتتاح" -> {
+          if (t.type == "افتتاح") {
+            currentBalance += t.amount
+          } else {
+            currentBalance += t.amount
+          }
+        }
+        else -> currentBalance += t.amount
       }
-      val rounded = if (Math.abs(currentBalance) < 0.01) 0.0 else Math.round(currentBalance * 100.0) / 100.0
-      updatedTransactions[i] = t.copy(balanceAfter = rounded)
+      t.copy(balanceAfter = currentBalance)
     }
-    val finalRounded = if (Math.abs(currentBalance) < 0.01) 0.0 else Math.round(currentBalance * 100.0) / 100.0
-    return customer.copy(balance = finalRounded, transactions = updatedTransactions)
-  }
-
-  fun recalculateAllCustomerBalances() {
-    for (i in customers.indices) {
-      val c = customers[i]
-      // If customer is already balanced at 0, do not recalculate with new exchange rates
-      if (Math.abs(c.balance) < 0.01 && c.transactions.isNotEmpty() && Math.abs(c.transactions.last().balanceAfter) < 0.01) {
-        continue
-      }
-      customers[i] = recalculateCustomerBalance(c)
-    }
-    saveCustomers()
+    return customer.copy(balance = currentBalance, transactions = updatedTransactions)
   }
 
   fun updateCustomerBalance(
@@ -1169,20 +1098,19 @@ class InvoiceRepository(context: Context) {
       put("sarToUsd", rates.sarToUsd)
     }
     prefs.edit().putString("exchangeRatesData", obj.toString()).apply()
-    recalculateAllCustomerBalances()
   }
 
   fun convertCurrency(amount: Double, fromCurrency: String, toCurrency: String): Double {
-    val from = if (fromCurrency == "USD" || fromCurrency == "$") "$" else fromCurrency
-    val to = if (toCurrency == "USD" || toCurrency == "$") "$" else toCurrency
+    val from = if (fromCurrency == "USD") "$" else fromCurrency
+    val to = if (toCurrency == "USD") "$" else toCurrency
     if (from == to) return amount
 
     val rate = when ("$from->$to") {
       "$->YER" -> exchangeRates.usdToYer
-      "YER->$" -> if (exchangeRates.usdToYer > 0) 1.0 / exchangeRates.usdToYer else exchangeRates.yerToUsd
+      "YER->$" -> exchangeRates.yerToUsd
       "$->SAR" -> exchangeRates.usdToSar
-      "SAR->$" -> if (exchangeRates.usdToSar > 0) 1.0 / exchangeRates.usdToSar else exchangeRates.sarToUsd
-      "YER->SAR" -> if (exchangeRates.sarToYer > 0) 1.0 / exchangeRates.sarToYer else exchangeRates.yerToSar
+      "SAR->$" -> exchangeRates.sarToUsd
+      "YER->SAR" -> exchangeRates.yerToSar
       "SAR->YER" -> exchangeRates.sarToYer
       else -> 1.0
     }
@@ -1597,10 +1525,7 @@ class InvoiceRepository(context: Context) {
             addressEn = sc.optString("addressEn", storeConfig.addressEn),
             wmAr = sc.optString("wmAr", storeConfig.wmAr),
             terms = sc.optString("terms", storeConfig.terms),
-            logoBase64 = sc.optString("logoBase64", storeConfig.logoBase64),
-            primaryCurrency = sc.optString("primaryCurrency", storeConfig.primaryCurrency),
-            primaryCurrencySymbol = sc.optString("primaryCurrencySymbol", storeConfig.primaryCurrencySymbol),
-            primaryCurrencyNameAr = sc.optString("primaryCurrencyNameAr", storeConfig.primaryCurrencyNameAr)
+            logoBase64 = sc.optString("logoBase64", storeConfig.logoBase64)
           )
         )
         restoredStore = true

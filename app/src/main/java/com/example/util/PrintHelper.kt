@@ -21,7 +21,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.example.R
 import com.example.data.Customer
-import com.example.data.ExchangeRates
 import com.example.data.InvoiceData
 import com.example.data.ReportCustomizationConfig
 import com.example.data.StoreConfig
@@ -555,31 +554,13 @@ object PrintHelper {
     return sb.toString().trim()
   }
 
-  fun convertCurrency(amount: Double, fromCurrency: String, toCurrency: String, rates: ExchangeRates): Double {
-    val from = if (fromCurrency == "USD" || fromCurrency == "$") "$" else fromCurrency
-    val to = if (toCurrency == "USD" || toCurrency == "$") "$" else toCurrency
-    if (from == to) return amount
-
-    val rate = when ("$from->$to") {
-      "$->YER" -> rates.usdToYer
-      "YER->$" -> if (rates.usdToYer > 0) 1.0 / rates.usdToYer else rates.yerToUsd
-      "$->SAR" -> rates.usdToSar
-      "SAR->$" -> if (rates.usdToSar > 0) 1.0 / rates.usdToSar else rates.sarToUsd
-      "YER->SAR" -> if (rates.sarToYer > 0) 1.0 / rates.sarToYer else rates.yerToSar
-      "SAR->YER" -> rates.sarToYer
-      else -> 1.0
-    }
-    return if (rate > 0) amount * rate else amount
-  }
-
   fun getStatementHtml(
     customer: Customer,
     storeConfig: StoreConfig,
     startDateStr: String = "",
     endDateStr: String = "",
     reportConfig: ReportCustomizationConfig = ReportCustomizationConfig(),
-    context: Context? = null,
-    exchangeRates: ExchangeRates = ExchangeRates()
+    context: Context? = null
   ): String {
     val dateStr = ArabicNumberHelper.formatReportDateTime()
     val scale = reportConfig.fontScale
@@ -621,11 +602,14 @@ object PrintHelper {
       }
     }
 
-    val primaryCurrency = storeConfig.primaryCurrency.ifBlank { "YER" }
-    val usedCurrencies = filteredTransactions.map { it.currency.ifBlank { primaryCurrency } }.distinct()
-    val isMultiCurrency = usedCurrencies.size > 1
-    val baseCurrency = if (usedCurrencies.size == 1) usedCurrencies.first() else primaryCurrency
-    val baseSym = ArabicNumberHelper.getCurrencySymbol(baseCurrency)
+    // Final balance for the selected period / current balance
+    val finalBalance = if (filteredTransactions.isNotEmpty()) {
+      filteredTransactions.last().balanceAfter
+    } else {
+      customer.balance
+    }
+
+    val lastCurrency = filteredTransactions.lastOrNull { it.currency.isNotBlank() }?.currency ?: "USD"
 
     val debitTransactions = filteredTransactions.filter {
       it.type == "صرف" || it.type == "فاتورة" || (it.type == "افتتاح" && it.amount > 0)
@@ -634,37 +618,21 @@ object PrintHelper {
       it.type == "قبض" || (it.type == "افتتاح" && it.amount < 0)
     }
 
-    val totalDebitInBase = debitTransactions.sumOf { t ->
-      val txCurr = t.currency.ifBlank { baseCurrency }
-      convertCurrency(t.amount, txCurr, baseCurrency, exchangeRates)
-    }
+    val totalDebit = debitTransactions.sumOf { it.amount }
+    val totalCredit = creditTransactions.sumOf { if (it.type == "افتتاح") Math.abs(it.amount) else it.amount }
 
-    val totalCreditInBase = creditTransactions.sumOf { t ->
-      val txCurr = t.currency.ifBlank { baseCurrency }
-      val amt = if (t.type == "افتتاح") Math.abs(t.amount) else t.amount
-      convertCurrency(amt, txCurr, baseCurrency, exchangeRates)
-    }
+    val debitCurrency = debitTransactions.lastOrNull { it.currency.isNotBlank() }?.currency ?: lastCurrency
+    val creditCurrency = creditTransactions.lastOrNull { it.currency.isNotBlank() }?.currency ?: lastCurrency
 
-    val isCustomerSettled = (Math.abs(customer.balance) < 0.01 && customer.transactions.isNotEmpty()) ||
-      (filteredTransactions.isNotEmpty() && Math.abs(filteredTransactions.last().balanceAfter) < 0.01)
-
-    val rawNetBal = totalDebitInBase - totalCreditInBase
-    val finalBalance = if (isCustomerSettled || Math.abs(rawNetBal) < 0.01) 0.0 else Math.round(rawNetBal * 100.0) / 100.0
-
-    val debitCurrencies = debitTransactions.map { it.currency.ifBlank { baseCurrency } }.distinct()
-    val creditCurrencies = creditTransactions.map { it.currency.ifBlank { baseCurrency } }.distinct()
-
-    val debitSym = if (debitCurrencies.size == 1) ArabicNumberHelper.getCurrencySymbol(debitCurrencies.first()) else baseSym
-    val debitAmount = if (debitCurrencies.size == 1) debitTransactions.sumOf { it.amount } else totalDebitInBase
-
-    val creditSym = if (creditCurrencies.size == 1) ArabicNumberHelper.getCurrencySymbol(creditCurrencies.first()) else baseSym
-    val creditAmount = if (creditCurrencies.size == 1) creditTransactions.sumOf { if (it.type == "افتتاح") Math.abs(it.amount) else it.amount } else totalCreditInBase
+    val debitSym = ArabicNumberHelper.getCurrencySymbol(debitCurrency)
+    val creditSym = ArabicNumberHelper.getCurrencySymbol(creditCurrency)
+    val finalSym = ArabicNumberHelper.getCurrencySymbol(lastCurrency)
 
     val debitSymBlue = """<span style="color:#0070BA;font-weight:bold;">$debitSym</span>"""
     val creditSymBlue = """<span style="color:#0070BA;font-weight:bold;">$creditSym</span>"""
-    val baseSymBlue = """<span style="color:#0070BA;font-weight:bold;">$baseSym</span>"""
+    val finalSymBlue = """<span style="color:#0070BA;font-weight:bold;">$finalSym</span>"""
 
-    val defaultCurrency = baseCurrency
+    val defaultCurrency = lastCurrency
 
     val periodBannerText = if (startDateStr.isNotBlank() && endDateStr.isNotBlank()) {
       "كشف حساب تفصيلي للفترة من: $startDateStr إلى: $endDateStr 📅"
@@ -733,10 +701,10 @@ object PrintHelper {
           "-"
         }
 
-        val balanceAfterStr = if (Math.abs(t.balanceAfter) < 0.01) {
-          """<span style="color:#16A34A;font-weight:bold;">0</span>"""
+        val balanceAfterStr = if (t.balanceAfter == 0.0) {
+          "$symBlue 0"
         } else {
-          """$baseSymBlue ${ArabicNumberHelper.formatAmount(t.balanceAfter)}"""
+          "$symBlue ${ArabicNumberHelper.formatAmount(t.balanceAfter)}"
         }
 
         val cleanNote = ArabicNumberHelper.cleanStatementNote(t.note)
@@ -757,21 +725,18 @@ object PrintHelper {
       }
     }
 
-    val isBalanced = finalBalance == 0.0
-    val finalBalTitle = if (isBalanced) {
-      "الحساب متزن ✔️"
-    } else if (finalBalance > 0) {
+    val finalBalTitle = if (finalBalance > 0) {
       "الباقي عليكم"
-    } else {
+    } else if (finalBalance < 0) {
       "الباقي لكم"
+    } else {
+      "الباقي"
     }
 
-    val finalBalColor = if (isBalanced) "#16A34A" else if (finalBalance > 0) "#5E258D" else "#2E7D32"
-
-    val finalBalVal = if (isBalanced) {
-      """<span style="color:#16A34A;font-weight:900;">0 (متزن)</span>"""
+    val finalBalVal = if (finalBalance == 0.0) {
+      "$finalSymBlue 0"
     } else {
-      """$baseSymBlue ${ArabicNumberHelper.formatAmount(Math.abs(finalBalance))}"""
+      "$finalSymBlue ${ArabicNumberHelper.formatAmount(Math.abs(finalBalance))}"
     }
 
     return """
@@ -900,17 +865,15 @@ object PrintHelper {
         <div class="footer-summary-container">
           <div style="flex:1;border:2px solid #EF5350;background:#fff;padding:12px 10px;border-radius:10px;text-align:center;">
             <div style="font-size:${14.5 * scale}px;font-weight:900;color:#C62828;">إجمالي عليكم</div>
-            <div style="font-size:${23 * scale}px;font-weight:900;color:#C62828;margin-top:4px;" dir="ltr">$debitSymBlue ${ArabicNumberHelper.formatAmount(debitAmount)}</div>
-            ${if (isMultiCurrency && debitCurrencies.size == 1 && debitCurrencies.first() != baseCurrency) """<div style="font-size:${11 * scale}px;font-weight:700;color:#C62828;margin-top:2px;">(يعادل: ${ArabicNumberHelper.formatAmount(totalDebitInBase)} $baseSym)</div>""" else ""}
+            <div style="font-size:${23 * scale}px;font-weight:900;color:#C62828;margin-top:4px;" dir="ltr">$debitSymBlue ${ArabicNumberHelper.formatAmount(totalDebit)}</div>
           </div>
           <div style="flex:1;border:2px solid #66BB6A;background:#fff;padding:12px 10px;border-radius:10px;text-align:center;">
             <div style="font-size:${14.5 * scale}px;font-weight:900;color:#2E7D32;">الإجمالي لكم</div>
-            <div style="font-size:${23 * scale}px;font-weight:900;color:#2E7D32;margin-top:4px;" dir="ltr">$creditSymBlue ${ArabicNumberHelper.formatAmount(creditAmount)}</div>
-            ${if (isMultiCurrency && creditCurrencies.size == 1 && creditCurrencies.first() != baseCurrency) """<div style="font-size:${11 * scale}px;font-weight:700;color:#2E7D32;margin-top:2px;">(يعادل: ${ArabicNumberHelper.formatAmount(totalCreditInBase)} $baseSym)</div>""" else ""}
+            <div style="font-size:${23 * scale}px;font-weight:900;color:#2E7D32;margin-top:4px;" dir="ltr">$creditSymBlue ${ArabicNumberHelper.formatAmount(totalCredit)}</div>
           </div>
-          <div style="flex:1;border:2px solid $finalBalColor;background:#fff;padding:12px 10px;border-radius:10px;text-align:center;">
-            <div style="font-size:${14.5 * scale}px;font-weight:900;color:$finalBalColor;">$finalBalTitle</div>
-            <div style="font-size:${23 * scale}px;font-weight:900;color:$finalBalColor;margin-top:4px;" dir="ltr">$finalBalVal</div>
+          <div style="flex:1;border:2px solid #5E258D;background:#fff;padding:12px 10px;border-radius:10px;text-align:center;">
+            <div style="font-size:${14.5 * scale}px;font-weight:900;color:#5E258D;">$finalBalTitle</div>
+            <div style="font-size:${23 * scale}px;font-weight:900;color:#5E258D;margin-top:4px;" dir="ltr">$finalBalVal</div>
           </div>
         </div>
         ${getSignaturesHtml(reportConfig, storeConfig)}
@@ -927,10 +890,9 @@ object PrintHelper {
     storeConfig: StoreConfig,
     startDateStr: String = "",
     endDateStr: String = "",
-    reportConfig: ReportCustomizationConfig = ReportCustomizationConfig(),
-    exchangeRates: ExchangeRates = ExchangeRates()
+    reportConfig: ReportCustomizationConfig = ReportCustomizationConfig()
   ) {
-    val html = getStatementHtml(customer, storeConfig, startDateStr, endDateStr, reportConfig, context, exchangeRates)
+    val html = getStatementHtml(customer, storeConfig, startDateStr, endDateStr, reportConfig, context)
     printHtml(context, html, "Statement_${customer.accountNumber}")
   }
 
@@ -941,10 +903,9 @@ object PrintHelper {
     startDateStr: String = "",
     endDateStr: String = "",
     reportConfig: ReportCustomizationConfig = ReportCustomizationConfig(),
-    exchangeRates: ExchangeRates = ExchangeRates(),
     onComplete: (File?) -> Unit
   ) {
-    val html = getStatementHtml(customer, storeConfig, startDateStr, endDateStr, reportConfig, context, exchangeRates)
+    val html = getStatementHtml(customer, storeConfig, startDateStr, endDateStr, reportConfig, context)
     val safeName = customer.name.replace(Regex("[^\\p{L}\\p{Nd}_-]"), "_").trim('_').ifEmpty { customer.accountNumber }
     val fileName = "كشف_حساب_${safeName}.pdf"
     exportHtmlToPdf(context, html, fileName, onComplete)

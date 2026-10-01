@@ -154,7 +154,6 @@ fun AlmamlakaApp(
             customer = customer,
             storeConfig = uiState.storeConfig,
             reportConfig = uiState.reportCustomizationConfig,
-            exchangeRates = uiState.exchangeRates,
             startDateStr = uiState.statementStartDate,
             endDateStr = uiState.statementEndDate,
             onChangePeriod = { viewModel.requestStatementDateRange(customer) },

@@ -235,63 +235,6 @@ fun MainScreen(viewModel: InvoiceViewModel) {
         }
       }
 
-      // تنبيه المواعيد المستحقة للعملاء (في حال وجود تنبيهات مستحقة اليوم)
-      if (uiState.showDueRemindersAlert && uiState.dueRemindersCount > 0) {
-        Surface(
-          color = Color(0xFFFEF2F2),
-          shape = RoundedCornerShape(12.dp),
-          border = BorderStroke(1.2.dp, Color(0xFFFCA5A5)),
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 2.dp)
-        ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-          ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-              modifier = Modifier.weight(1f)
-            ) {
-              Text("⏰", fontSize = 20.sp)
-              Column(modifier = Modifier.weight(1f)) {
-                Text(
-                  "تنبيه مستحق: لديك ${uiState.dueRemindersCount} مواعيد سداد اليوم!",
-                  fontWeight = FontWeight.Black,
-                  fontSize = 13.sp,
-                  color = Color(0xFF991B1B)
-                )
-                Text(
-                  "انتهت المهلة المحددة لمتابعة بعض حسابات العملاء.",
-                  fontSize = 11.sp,
-                  color = Color(0xFFB91C1C)
-                )
-              }
-            }
-            Spacer(modifier = Modifier.width(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Button(
-                onClick = { viewModel.openCustomerRemindersShortcut() },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                modifier = Modifier.height(32.dp)
-              ) {
-                Text("عرض التنبيهات", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-              }
-              IconButton(
-                onClick = { viewModel.dismissDueRemindersAlert() },
-                modifier = Modifier.size(28.dp)
-              ) {
-                Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = Color(0xFF991B1B), modifier = Modifier.size(16.dp))
-              }
-            }
-          }
-        }
-      }
-
       // إذا كانت استمارة الفاتورة مغلقة: نعرض الواجهة الرئيسية المطابقة تماماً للصورة
       if (!uiState.isFormVisible) {
         // 2. شبكة الاختصارات السريعة (2x2) مطابقة تماماً للصورة
@@ -566,12 +509,11 @@ fun InvoiceFormSection(viewModel: InvoiceViewModel) {
         Column(modifier = Modifier.weight(1f)) {
           FormFieldLabel(text = "العملة")
           Box(modifier = Modifier.fillMaxWidth()) {
-            val primaryCode = uiState.storeConfig.primaryCurrency
             val currLabel = when (uiState.currency) {
-              "YER" -> if (primaryCode == "YER") "YER (الرئيسية ⭐)" else "YER"
-              "$" -> if (primaryCode in listOf("USD", "$")) "USD (الرئيسية ⭐)" else "USD ($)"
-              "SAR" -> if (primaryCode == "SAR") "SAR (الرئيسية ⭐)" else "SAR"
-              else -> if (uiState.currency == primaryCode) "${uiState.currency} (الرئيسية ⭐)" else uiState.currency
+              "YER" -> "YER"
+              "$" -> "USD"
+              "SAR" -> "SAR"
+              else -> uiState.currency
             }
             StyledInputContainer(
               isYellowTheme = false,
@@ -599,60 +541,28 @@ fun InvoiceFormSection(viewModel: InvoiceViewModel) {
               expanded = currencyMenuExpanded,
               onDismissRequest = { currencyMenuExpanded = false }
             ) {
+              // ريال يمني رقم واحد كما في الصورة والطلب
               DropdownMenuItem(
-                text = {
-                  Text(
-                    text = if (primaryCode == "YER") "YER (ريال يمني) ⭐ الرئيسية" else "YER (ريال يمني)",
-                    fontWeight = FontWeight.Bold,
-                    color = if (primaryCode == "YER") Color(0xFF15803D) else Color.Unspecified
-                  )
-                },
+                text = { Text("YER (ريال يمني)", fontWeight = FontWeight.Bold) },
                 onClick = {
                   viewModel.updateCurrency("YER")
                   currencyMenuExpanded = false
                 }
               )
               DropdownMenuItem(
-                text = {
-                  Text(
-                    text = if (primaryCode in listOf("USD", "$")) "($) USD (دولار) ⭐ الرئيسية" else "($) USD (دولار)",
-                    fontWeight = FontWeight.Bold,
-                    color = if (primaryCode in listOf("USD", "$")) Color(0xFF15803D) else Color.Unspecified
-                  )
-                },
+                text = { Text("($) USD (دولار)", fontWeight = FontWeight.Bold) },
                 onClick = {
                   viewModel.updateCurrency("$")
                   currencyMenuExpanded = false
                 }
               )
               DropdownMenuItem(
-                text = {
-                  Text(
-                    text = if (primaryCode == "SAR") "(SR) SAR (ريال سعودي) ⭐ الرئيسية" else "(SR) SAR (ريال سعودي)",
-                    fontWeight = FontWeight.Bold,
-                    color = if (primaryCode == "SAR") Color(0xFF15803D) else Color.Unspecified
-                  )
-                },
+                text = { Text("(SR) SAR (ريال سعودي)", fontWeight = FontWeight.Bold) },
                 onClick = {
                   viewModel.updateCurrency("SAR")
                   currencyMenuExpanded = false
                 }
               )
-              if (primaryCode !in listOf("YER", "SAR", "USD", "$") && primaryCode.isNotBlank()) {
-                DropdownMenuItem(
-                  text = {
-                    Text(
-                      text = "${uiState.storeConfig.primaryCurrencyNameAr} ($primaryCode) ⭐ الرئيسية",
-                      fontWeight = FontWeight.Bold,
-                      color = Color(0xFF15803D)
-                    )
-                  },
-                  onClick = {
-                    viewModel.updateCurrency(primaryCode)
-                    currencyMenuExpanded = false
-                  }
-                )
-              }
             }
           }
         }
@@ -903,21 +813,6 @@ fun InvoiceFormSection(viewModel: InvoiceViewModel) {
               ),
               cursorBrush = SolidColor(Color(0xFF5E258D)),
               modifier = Modifier.fillMaxWidth()
-            )
-          }
-
-          val priceVal = uiState.price.toDoubleOrNull() ?: 0.0
-          val primaryCurrCode = uiState.storeConfig.primaryCurrency
-          val isDiffFromPrimary = (uiState.currency != primaryCurrCode) &&
-            !(uiState.currency in listOf("USD", "$") && primaryCurrCode in listOf("USD", "$"))
-          if (priceVal > 0 && isDiffFromPrimary) {
-            val equivInPrimary = viewModel.getEquivalentInPrimaryCurrency(priceVal, uiState.currency)
-            Text(
-              text = "≈ ${com.example.util.ArabicNumberHelper.formatAmount(equivInPrimary)} ${uiState.storeConfig.primaryCurrencySymbol} (بالعملة الرئيسية)",
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Bold,
-              color = Color(0xFF15803D),
-              modifier = Modifier.padding(top = 2.dp)
             )
           }
         }

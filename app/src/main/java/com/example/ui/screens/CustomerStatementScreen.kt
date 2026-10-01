@@ -83,7 +83,6 @@ fun CustomerStatementScreen(
   customer: Customer,
   storeConfig: StoreConfig,
   reportConfig: ReportCustomizationConfig = ReportCustomizationConfig(),
-  exchangeRates: com.example.data.ExchangeRates = com.example.data.ExchangeRates(),
   startDateStr: String = "",
   endDateStr: String = "",
   onChangePeriod: () -> Unit = {},
@@ -134,60 +133,20 @@ fun CustomerStatementScreen(
     }
   }
 
-  // Multi-currency calculation
-  val primaryCurrency = storeConfig.primaryCurrency.ifBlank { "YER" }
-  val usedCurrencies = filteredTransactions.map { it.currency.ifBlank { primaryCurrency } }.distinct()
-  val isMultiCurrency = usedCurrencies.size > 1
-  val baseCurrency = if (usedCurrencies.size == 1) usedCurrencies.first() else primaryCurrency
-  val baseSym = ArabicNumberHelper.getCurrencySymbol(baseCurrency)
-
-  fun convertCurrencyLocal(amount: Double, fromCurrency: String, toCurrency: String): Double {
-    val from = if (fromCurrency == "USD" || fromCurrency == "$") "$" else fromCurrency
-    val to = if (toCurrency == "USD" || toCurrency == "$") "$" else toCurrency
-    if (from == to) return amount
-
-    val rate = when ("$from->$to") {
-      "$->YER" -> exchangeRates.usdToYer
-      "YER->$" -> if (exchangeRates.usdToYer > 0) 1.0 / exchangeRates.usdToYer else exchangeRates.yerToUsd
-      "$->SAR" -> exchangeRates.usdToSar
-      "SAR->$" -> if (exchangeRates.usdToSar > 0) 1.0 / exchangeRates.usdToSar else exchangeRates.sarToUsd
-      "YER->SAR" -> if (exchangeRates.sarToYer > 0) 1.0 / exchangeRates.sarToYer else exchangeRates.yerToSar
-      "SAR->YER" -> exchangeRates.sarToYer
-      else -> 1.0
-    }
-    return if (rate > 0) amount * rate else amount
+  // Final balance for filtered transactions or customer balance
+  val finalBalance = if (filteredTransactions.isNotEmpty()) {
+    filteredTransactions.last().balanceAfter
+  } else {
+    customer.balance
   }
 
-  // Total Debit in base currency
-  val totalDebitInBase = filteredTransactions.filter {
-    it.type == "صرف" || it.type == "فاتورة" || (it.type == "افتتاح" && it.amount > 0)
-  }.sumOf { t ->
-    val txCurr = t.currency.ifBlank { baseCurrency }
-    convertCurrencyLocal(t.amount, txCurr, baseCurrency)
-  }
-
-  // Total Credit in base currency
-  val totalCreditInBase = filteredTransactions.filter {
-    it.type == "قبض" || (it.type == "افتتاح" && it.amount < 0)
-  }.sumOf { t ->
-    val txCurr = t.currency.ifBlank { baseCurrency }
-    val amt = if (t.type == "افتتاح") Math.abs(t.amount) else t.amount
-    convertCurrencyLocal(amt, txCurr, baseCurrency)
-  }
-
-  val rawDebitSum = filteredTransactions.filter {
+  val totalDebit = filteredTransactions.filter {
     it.type == "صرف" || it.type == "فاتورة" || (it.type == "افتتاح" && it.amount > 0)
   }.sumOf { it.amount }
 
-  val rawCreditSum = filteredTransactions.filter {
+  val totalCredit = filteredTransactions.filter {
     it.type == "قبض" || (it.type == "افتتاح" && it.amount < 0)
   }.sumOf { if (it.type == "افتتاح") Math.abs(it.amount) else it.amount }
-
-  val isCustomerSettled = (Math.abs(customer.balance) < 0.01 && customer.transactions.isNotEmpty()) ||
-    (filteredTransactions.isNotEmpty() && Math.abs(filteredTransactions.last().balanceAfter) < 0.01)
-
-  val rawNetBal = totalDebitInBase - totalCreditInBase
-  val finalBalance = if (isCustomerSettled || Math.abs(rawNetBal) < 0.01) 0.0 else Math.round(rawNetBal * 100.0) / 100.0
 
   val primaryBlue = parseHexColor(reportConfig.tableBorderColorHex, Color(0xFF0070BA))
   val textBlue = parseHexColor(reportConfig.tableBorderColorHex, Color(0xFF0288D1))
@@ -912,17 +871,11 @@ fun CustomerStatementScreen(
                     } else null
 
                     val balanceAfterAnnotated = buildAnnotatedString {
-                      if (Math.abs(t.balanceAfter) < 0.01) {
-                        withStyle(SpanStyle(color = Color(0xFF16A34A), fontWeight = FontWeight.Black)) {
-                          append("0")
-                        }
-                      } else {
-                        withStyle(SpanStyle(color = Color(0xFF0070BA), fontWeight = FontWeight.Black)) {
-                          append(baseSym)
-                        }
-                        withStyle(SpanStyle(color = purpleBrand, fontWeight = FontWeight.Black)) {
-                          append(ArabicNumberHelper.formatAmount(t.balanceAfter))
-                        }
+                      withStyle(SpanStyle(color = Color(0xFF0070BA), fontWeight = FontWeight.Black)) {
+                        append(tSym)
+                      }
+                      withStyle(SpanStyle(color = purpleBrand, fontWeight = FontWeight.Black)) {
+                        append(if (t.balanceAfter == 0.0) "0" else ArabicNumberHelper.formatAmount(t.balanceAfter))
                       }
                     }
 
@@ -1050,22 +1003,17 @@ fun CustomerStatementScreen(
               horizontalArrangement = Arrangement.spacedBy(8.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
-              val debitCurrencies = filteredTransactions.filter {
+              val lastCurrency = filteredTransactions.lastOrNull { it.currency.isNotBlank() }?.currency ?: "USD"
+              val debitCurrency = filteredTransactions.filter {
                 it.type == "صرف" || it.type == "فاتورة" || (it.type == "افتتاح" && it.amount > 0)
-              }.map { it.currency.ifBlank { baseCurrency } }.distinct()
-
-              val creditCurrencies = filteredTransactions.filter {
+              }.lastOrNull { it.currency.isNotBlank() }?.currency ?: lastCurrency
+              val creditCurrency = filteredTransactions.filter {
                 it.type == "قبض" || (it.type == "افتتاح" && it.amount < 0)
-              }.map { it.currency.ifBlank { baseCurrency } }.distinct()
+              }.lastOrNull { it.currency.isNotBlank() }?.currency ?: lastCurrency
 
-              val debitSym = if (debitCurrencies.size == 1) ArabicNumberHelper.getCurrencySymbol(debitCurrencies.first()) else baseSym
-              val debitAmount = if (debitCurrencies.size == 1) rawDebitSum else totalDebitInBase
-
-              val creditSym = if (creditCurrencies.size == 1) ArabicNumberHelper.getCurrencySymbol(creditCurrencies.first()) else baseSym
-              val creditAmount = if (creditCurrencies.size == 1) rawCreditSum else totalCreditInBase
-
-              val showCreditEquiv = isMultiCurrency && creditCurrencies.size == 1 && creditCurrencies.first() != baseCurrency
-              val showDebitEquiv = isMultiCurrency && debitCurrencies.size == 1 && debitCurrencies.first() != baseCurrency
+              val debitSym = ArabicNumberHelper.getCurrencySymbol(debitCurrency)
+              val creditSym = ArabicNumberHelper.getCurrencySymbol(creditCurrency)
+              val finalSym = ArabicNumberHelper.getCurrencySymbol(lastCurrency)
 
               // Card 1 (Right in RTL): إجمالي عليكم
               Card(
@@ -1096,21 +1044,12 @@ fun CustomerStatementScreen(
                           append(debitSym)
                         }
                         withStyle(SpanStyle(color = Color(0xFFC62828), fontWeight = FontWeight.Black)) {
-                          append(ArabicNumberHelper.formatAmount(debitAmount))
+                          append(ArabicNumberHelper.formatAmount(totalDebit))
                         }
                       },
                       fontSize = 17.sp,
                       textAlign = TextAlign.Center,
                       maxLines = 1
-                    )
-                  }
-                  if (showDebitEquiv) {
-                    Text(
-                      text = "(يعادل: ${ArabicNumberHelper.formatAmount(totalDebitInBase)} $baseSym)",
-                      fontSize = 10.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = Color(0xFFC62828),
-                      textAlign = TextAlign.Center
                     )
                   }
                 }
@@ -1145,7 +1084,7 @@ fun CustomerStatementScreen(
                           append(creditSym)
                         }
                         withStyle(SpanStyle(color = Color(0xFF2E7D32), fontWeight = FontWeight.Black)) {
-                          append(ArabicNumberHelper.formatAmount(creditAmount))
+                          append(ArabicNumberHelper.formatAmount(totalCredit))
                         }
                       },
                       fontSize = 17.sp,
@@ -1153,36 +1092,24 @@ fun CustomerStatementScreen(
                       maxLines = 1
                     )
                   }
-                  if (showCreditEquiv) {
-                    Text(
-                      text = "(يعادل: ${ArabicNumberHelper.formatAmount(totalCreditInBase)} $baseSym)",
-                      fontSize = 10.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = Color(0xFF2E7D32),
-                      textAlign = TextAlign.Center
-                    )
-                  }
                 }
               }
 
               // Card 3 (Left in RTL): الباقي لكم / عليكم / متزن
-              val isBalanced = finalBalance == 0.0
-              val finalBalTitle = if (isBalanced) {
-                "الحساب متزن ✔️"
-              } else if (finalBalance > 0) {
+              val finalBalTitle = if (finalBalance > 0) {
                 "الباقي عليكم"
-              } else {
+              } else if (finalBalance < 0) {
                 "الباقي لكم"
+              } else {
+                "الباقي"
               }
-
-              val finalCardBorder = if (isBalanced) Color(0xFF16A34A) else if (finalBalance > 0) purpleBrand else Color(0xFF2E7D32)
-              val finalCardTextColor = if (isBalanced) Color(0xFF16A34A) else if (finalBalance > 0) purpleBrand else Color(0xFF2E7D32)
+              val balAmt = if (finalBalance == 0.0) "0" else ArabicNumberHelper.formatAmount(Math.abs(finalBalance))
 
               Card(
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(10.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = androidx.compose.foundation.BorderStroke(2.dp, finalCardBorder)
+                border = androidx.compose.foundation.BorderStroke(2.dp, purpleBrand)
               ) {
                 Column(
                   modifier = Modifier
@@ -1194,56 +1121,27 @@ fun CustomerStatementScreen(
                     text = finalBalTitle,
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.Black,
-                    color = finalCardTextColor,
+                    color = purpleBrand,
                     textAlign = TextAlign.Center,
                     maxLines = 1
                   )
                   Spacer(modifier = Modifier.height(3.dp))
-                  if (isBalanced) {
+                  CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     Text(
-                      text = "0",
-                      fontSize = 18.sp,
+                      text = buildAnnotatedString {
+                        withStyle(SpanStyle(color = Color(0xFF0070BA), fontWeight = FontWeight.Black)) {
+                          append(finalSym)
+                        }
+                        withStyle(SpanStyle(color = purpleBrand, fontWeight = FontWeight.Black)) {
+                          append(balAmt)
+                        }
+                      },
+                      fontSize = 17.sp,
                       fontWeight = FontWeight.Black,
-                      color = Color(0xFF16A34A),
-                      textAlign = TextAlign.Center
+                      color = purpleBrand,
+                      textAlign = TextAlign.Center,
+                      maxLines = 1
                     )
-                    Text(
-                      text = "متزن تماماً (0)",
-                      fontSize = 9.5.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = Color(0xFF15803D),
-                      textAlign = TextAlign.Center
-                    )
-                  } else {
-                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                      Text(
-                        text = buildAnnotatedString {
-                          withStyle(SpanStyle(color = Color(0xFF0070BA), fontWeight = FontWeight.Black)) {
-                            append(baseSym)
-                          }
-                          withStyle(SpanStyle(color = finalCardTextColor, fontWeight = FontWeight.Black)) {
-                            append(ArabicNumberHelper.formatAmount(Math.abs(finalBalance)))
-                          }
-                        },
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Black,
-                        color = finalCardTextColor,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1
-                      )
-                    }
-                    if (isMultiCurrency) {
-                      val otherCurr = if (baseCurrency in listOf("USD", "$")) "YER" else "USD"
-                      val otherSym = ArabicNumberHelper.getCurrencySymbol(otherCurr)
-                      val otherVal = convertCurrencyLocal(Math.abs(finalBalance), baseCurrency, otherCurr)
-                      Text(
-                        text = "≈ $otherSym ${ArabicNumberHelper.formatAmount(otherVal)}",
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF6B7280),
-                        textAlign = TextAlign.Center
-                      )
-                    }
                   }
                 }
               }

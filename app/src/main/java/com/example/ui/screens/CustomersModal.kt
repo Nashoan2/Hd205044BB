@@ -830,7 +830,7 @@ fun TabPaymentVoucher(viewModel: InvoiceViewModel) {
   val dynamicShadedBorder = LocalShadedFieldBorder.current
   var acc by remember { mutableStateOf("") }
   var amountStr by remember { mutableStateOf("") }
-  var curr by remember(uiState.storeConfig.primaryCurrency) { mutableStateOf(uiState.storeConfig.primaryCurrency) }
+  var curr by remember { mutableStateOf("YER") }
   var currMenuExpanded by remember { mutableStateOf(false) }
   var note by remember { mutableStateOf("") }
   var voucherDate by remember { mutableStateOf(ArabicNumberHelper.formatDateTime()) }
@@ -1680,7 +1680,7 @@ fun TabReceiptVoucher(viewModel: InvoiceViewModel) {
   val dynamicShadedBorder = LocalShadedFieldBorder.current
   var acc by remember { mutableStateOf("") }
   var amountStr by remember { mutableStateOf("") }
-  var curr by remember(uiState.storeConfig.primaryCurrency) { mutableStateOf(uiState.storeConfig.primaryCurrency) }
+  var curr by remember { mutableStateOf("YER") }
   var currMenuExpanded by remember { mutableStateOf(false) }
   var note by remember { mutableStateOf("") }
   var voucherDate by remember { mutableStateOf(ArabicNumberHelper.formatDateTime()) }
@@ -4220,7 +4220,7 @@ fun TabCustomerStatement(viewModel: InvoiceViewModel, onDismiss: () -> Unit) {
             Text("حساب: ${customer.accountNumber} | هاتف: ${customer.phone.ifEmpty { "—" }}", fontSize = 12.sp, color = Color.Gray)
           }
           Text(
-            "${ArabicNumberHelper.formatAmount(customer.balance)} ${uiState.storeConfig.primaryCurrencySymbol}",
+            "${ArabicNumberHelper.formatAmount(customer.balance)} $",
             fontWeight = FontWeight.ExtraBold,
             fontSize = 14.sp,
             color = if (customer.balance > 0) Color(0xFFD32F2F) else Color(0xFF28A745)
@@ -4410,7 +4410,7 @@ fun TabCustomerStatementDateRange(viewModel: InvoiceViewModel, onDismiss: () -> 
                   Text("حساب: ${customer.accountNumber} | هاتف: ${customer.phone.ifEmpty { "—" }}", fontSize = 12.sp, color = Color.Gray)
                 }
                 Text(
-                  text = "${ArabicNumberHelper.formatAmount(customer.balance)} ${uiState.storeConfig.primaryCurrencySymbol}",
+                  text = "${ArabicNumberHelper.formatAmount(customer.balance)} $",
                   fontWeight = FontWeight.ExtraBold,
                   fontSize = 14.sp,
                   color = if (customer.balance > 0) Color(0xFFD32F2F) else Color(0xFF28A745)
@@ -4446,7 +4446,7 @@ fun TabCustomerStatementDateRange(viewModel: InvoiceViewModel, onDismiss: () -> 
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-              text = "رقم الحساب: ${customer.accountNumber} | الرصيد الحالي: ${ArabicNumberHelper.formatAmount(customer.balance)} ${uiState.storeConfig.primaryCurrencySymbol}",
+              text = "رقم الحساب: ${customer.accountNumber} | الرصيد الحالي: ${ArabicNumberHelper.formatAmount(customer.balance)} $",
               fontSize = 12.5.sp,
               fontWeight = FontWeight.SemiBold,
               color = Color(0xFF555555)

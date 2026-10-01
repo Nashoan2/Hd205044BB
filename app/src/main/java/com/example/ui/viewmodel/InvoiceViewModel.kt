@@ -201,15 +201,7 @@ class InvoiceViewModel(application: Application) : AndroidViewModel(application)
   ) {
     _uiState.value = _uiState.value.copy(isExportingPdf = true)
     showToast("⏳ جاري تجهيز وتصدير كشف الحساب بصيغة PDF...")
-    PrintHelper.exportStatementToPdf(
-      context = context,
-      customer = customer,
-      storeConfig = _uiState.value.storeConfig,
-      startDateStr = startDateStr,
-      endDateStr = endDateStr,
-      reportConfig = _uiState.value.reportCustomizationConfig,
-      exchangeRates = _uiState.value.exchangeRates
-    ) { file ->
+    PrintHelper.exportStatementToPdf(context, customer, _uiState.value.storeConfig, startDateStr, endDateStr, _uiState.value.reportCustomizationConfig) { file ->
       _uiState.value = _uiState.value.copy(isExportingPdf = false)
       if (file != null && file.exists()) {
         val sizeKb = String.format(Locale.US, "%.1f", file.length() / 1024.0) + " KB"
@@ -1960,44 +1952,6 @@ class InvoiceViewModel(application: Application) : AndroidViewModel(application)
     showToast("✅ تم حفظ إعدادات المحل والتقرير بنجاح.")
   }
 
-  fun updatePrimaryCurrency(
-    currencyCode: String,
-    symbol: String,
-    nameAr: String,
-    newRates: ExchangeRates? = null
-  ) {
-    val updatedStore = _uiState.value.storeConfig.copy(
-      primaryCurrency = currencyCode,
-      primaryCurrencySymbol = symbol,
-      primaryCurrencyNameAr = nameAr
-    )
-    repository.saveStoreConfig(updatedStore)
-
-    if (newRates != null) {
-      repository.saveExchangeRates(newRates)
-      _uiState.value = _uiState.value.copy(
-        storeConfig = updatedStore,
-        exchangeRates = newRates,
-        currency = currencyCode
-      )
-    } else {
-      _uiState.value = _uiState.value.copy(
-        storeConfig = updatedStore,
-        currency = currencyCode
-      )
-    }
-    showToast("✅ تم تعيين ($nameAr - $symbol) كالعملة الرئيسية للتطبيق بنجاح.")
-  }
-
-  fun convertAmount(amount: Double, fromCurrency: String, toCurrency: String): Double {
-    return repository.convertCurrency(amount, fromCurrency, toCurrency)
-  }
-
-  fun getEquivalentInPrimaryCurrency(amount: Double, fromCurrency: String): Double {
-    val primary = _uiState.value.storeConfig.primaryCurrency
-    return repository.convertCurrency(amount, fromCurrency, primary)
-  }
-
   fun updateStoreLogo(base64: String) {
     val updated = _uiState.value.storeConfig.copy(logoBase64 = base64)
     repository.saveStoreConfig(updated)
@@ -2272,7 +2226,7 @@ class InvoiceViewModel(application: Application) : AndroidViewModel(application)
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(Date())
         _uiState.value = _uiState.value.copy(
           lastAutoBackupDate = todayStr,
-          roomSnapshots = repository.roomBackupManager.getAllRoomSnapshots()
+          roomSnapshots = repository.roomBackupManager.getAllSnapshots()
         )
         showToast("✅ تم تصدير النسخة الاحتياطية بنجاح إلى وحدة التخزين:\n${file.name}")
       } else {
@@ -2289,7 +2243,7 @@ class InvoiceViewModel(application: Application) : AndroidViewModel(application)
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(Date())
         _uiState.value = _uiState.value.copy(
           lastAutoBackupDate = todayStr,
-          roomSnapshots = repository.roomBackupManager.getAllRoomSnapshots()
+          roomSnapshots = repository.roomBackupManager.getAllSnapshots()
         )
         showToast("🔄 تم تصدير نسخة احتياطية تلقائية لليوم إلى وحدة التخزين بنجاح.")
       }
